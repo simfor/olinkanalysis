@@ -1,2 +1,2 @@
-# olinkanalysis
-Lunch seminar on November 7th.
+# Olink Data Analysis
+Lunch seminar Center for Molecular Medicine November 7th.
