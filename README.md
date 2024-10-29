@@ -7,6 +7,7 @@ Lunch seminar Center for Molecular Medicine November 7th.
   - [R and Rstudio basics](#r-and-rstudio-basics)
   - [Dataset](#dataset)
   - [Learning objectives](#learning-objectives)
+  - [Other resources](#other-resources)
 
 ## R and Rstudio basics
 If you are not familiar with R and Rstudio, we recomend going over the following tutorials before the seminar:  
@@ -22,3 +23,9 @@ In this workshop we will use the dataset to:
   1) **Compare OLINK protein profiles between cases and controls, as well as between the disease sub-groups:**  Disease subgroups have been adjusted to mimic those of [Diaz-Gallo et. al. 2022](https://pubmed.ncbi.nlm.nih.gov/34658170/).
   2) **Investigate whether there is a significant different between protein profiles between males and females**  
   3) **Investigate if differences between protein profiles across subgroups may be influced by treatment of two commonly used drugs to treat SLE**
+   
+## Other resources
+[Olink-analyze](https://olink.com/software/olink-analyze): Olink R package.  
+[Stat Analyzer](https://insight.olink.com/): Interactive tool to carry out statistical analysis. You must first create an account, login and go to the tools and resources section.  
+[Cheat sheet](/resources/olink-analyze-cheatsheet.pdf): Olink analysis cheat sheet.
+
