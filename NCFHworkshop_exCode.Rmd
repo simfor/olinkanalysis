@@ -1,0 +1,202 @@
+---
+title: "NCFH workshop"
+author: "Simon Forsberg"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this short tutorial we will analyze some artificial Olink data. The dataset contains protein expression values for 92 proteins in 500 samples. We will attempt to answer the following questions:
+
+1.  Are there any proteins whose levels differ between cases and controls?
+2.  Between disease sub-groups?
+3.  Between males and females?
+4.  Do drug treatments have an effect on any of the protein levels?
+5.  Does age at diagnosis have an effect on any of the above?
+
+We will make use of some basic R-functions, various functions from the tidyverse eco-system of packages, as well as Olinks R-package OlinkAnalyze. Let's start by loading the packages we will need (if you do not have these packages installed, simply run *install.packages(nameOfPackage)*).
+
+```{r load packages, message=FALSE}
+library(tidyverse)
+library(broom)
+library(OlinkAnalyze)
+```
+
+## Load data
+
+When you receive data from Olink, it is in the form of a parquet file that can be read with the function *OlinkAnalyze::read_NPX*. If you have additional files with clinical variables etc, you can then read them into R and join them to the Olink data using for instance the function *dplyr::left_join*.
+
+For this tutorial, we will use a dataset that is already annotated with clinical variables. Since it is not in the standard Olink format, we will read it with the function *read_delim*.
+
+```{r read data, message=FALSE}
+data <- read_delim('dataset/toy_dataset_olink_workshop.csv', delim = ';') %>% 
+  mutate(across(7:11, as.factor)) # This tells R to treat columns 7 to 11 as factors. This means that they are "dummy variables" identifying discrete groups
+```
+
+## Quick look at the data
+
+Let us start with a quick look at how the data is formated.
+
+```{r data format}
+data
+```
+
+Each row in data contains the level of one protein in one sample. The columns UniProt, OlinkID, and Assay tell us which protein by alternative IDs. The column SampleID tells us which sample, and the column NPX contains the protein levels in Olinks unit Normalized Protein Expression. You will find these columns in all Olink data. The last six columns (Clustering, phenotype, Sex, Methotrexate, Chloroquine, Age_at_diagnosis) contain the clinical variables and are specific to this dataset.
+
+To get an overview of the data, we will first do a Principal Component Analysis (PCA). This will project the high dimensional data (92 proteins/dimensions) onto a plane (2 dimensions) for easy visualization. This is a good way to look for global trends in the data.
+
+```{r PCA}
+olink_pca_plot(data, color_g = 'phenotype')
+```
+
+Each point in this figure represents one sample, and the colors indicate case vs control. No clear separation can be seen between cases and controls. However, remember that this is a "birds eye view" of the data and some proteins might still differ between cases and controls. Try changing the *color_g* argument to color by other variables/traits.
+
+## Cases vs Controls
+
+To see if there are any proteins whose levels differ between cases and controls, we will perform one t-test per protein. This tests if the mean NPX level differs between the two groups. Since we perform 92 different tests, we also need to adjust our p-values accordingly. This can easily be done with the function *olink_ttest* (for a non-paramteric equivalent, try using *olink_wilcox* instead). We will then visualize the t-test results using the function *olink_volcano_plot*.
+
+```{r t-tests caseControl}
+caseControl_tTest <- olink_ttest(df = data, variable = 'phenotype')
+caseControl_tTest
+
+# Visualize in a volcano plot
+olink_volcano_plot(caseControl_tTest)
+```
+
+The volcano plot shows the mean difference between cases and controls (x-axis) versus the corresponding p-value (y-axis). Each point corresponds to one protein. We can see that after multiple testing adjustment, six proteins differ significantly between cases and controls. To look closer at these proteins, we can use *olink_boxplot* to plot the distributions per protein and sample group in the form of boxplots. We can see that for all of these proteins, the levels are on average higher in patient group 2.
+
+```{r boxplots}
+significant <- caseControl_tTest %>% 
+  filter(Threshold == 'Significant') %>% 
+  pull(OlinkID)
+
+caseControl_boxplots <- olink_boxplot(df = data, variable = 'phenotype', olinkid_list = significant)
+caseControl_boxplots[[1]]
+```
+
+## Disease subgroups
+
+To test if protein levels differ between more than 2 groups, we can perform an analysis of variance (ANOVA) per protein. This will test if all groups have the same mean protein level (the null hypothesis), or if the mean in any group differ from the others (the alternative hypothesis). In other words, a significant ANOVA result tells us that at least one group differ from the others. In this dataset, samples are classified into 6 disease groups, indicated by the variable "Clustering." We will use the function *olink_anova* to test if there are any differences between them and again, we will use the function *olink_boxplot* to plot significant proteins.
+
+```{r disease subgroups}
+diseaseGroup_anova <- olink_anova(df = data, variable = 'Clustering')
+diseaseGroup_anova
+
+# boxplots of significant proteins
+significant <- diseaseGroup_anova %>% 
+  filter(Threshold == 'Significant') %>% 
+  pull(OlinkID)
+
+diseaseGroup_boxplots <- olink_boxplot(df = data, variable = 'Clustering', olinkid_list = significant)
+diseaseGroup_boxplots[[1]]
+```
+
+## Sex differences
+
+To identify proteins that differ significantly between males and females, we will again use *olink_ttest* to perform a t-test per protein. This time, we will tell the function to use the variable "Sex".
+
+```{r t-tests sex}
+sex_tTest <- olink_ttest(df = data, variable = 'Sex')
+
+olink_volcano_plot(sex_tTest)
+```
+
+In this case, non of the proteins show a significant sex difference.
+
+## Drug treatments
+
+Some of the patients in this study were treated with Methotrexate or Chloroquine. The tretment level, found in the corresponding columns, is indicated as either 0, 1, or 2. We will start by testing if any proteins show differences between these treatment levels. To this end, we will use *olink_anova* to perform an ANOVA per protein and treatment
+
+#### NOTE and warning
+
+R uses the data type *factor* to encode "dummy variables", where the values identify discrete groups but have no numeric meaning. If a variable contains strings (A, B, C, etc), most R-functions will automatically assume that it is a discrete variable and treat it as a factor. However, it the variable contains numbers, R will typically assume that it is numeric. If numbers are used to label discrete groups, as in this case, you therefore have to convert it to a factor yourself. When loading the data, we did this by applying the function *as.factor* to columns 7-11, ensuring that all downstream functions treat the data accordingly.
+
+```{r drug treatments}
+Methotrexate_anova <- olink_anova(df = data, variable = 'Methotrexate')
+Chloroquine_anova <- olink_anova(df = data, variable = 'Chloroquine')
+
+Methotrexate_anova
+Chloroquine_anova
+```
+
+One protein showed a small but significant difference between the Methotrexate treatment groups. Note that many samples do not have any treatment information (Methotrexate or Chloroquine is NA) and were automatically removed from the analysis.
+
+Next, we will test if the combination of disease subgroup and treatment has an effect on any of the protein levels. To this end, we will fit linear regression models including disease group (the "Clustering" variable), treatment ("Methotrexate" or "Chloroquine"), and the interaction between the two (NPX \~ diseaseGroup + treatment + diseaseGroup\*treatment). Such an analysis is also referred to as a two way ANOVA. This is achieved with *olink_anova* by giving the argument *variable* a vector stating the two variables to be analyzed (type *?olink_anova* in the console for further information).
+
+```{r treatment-by-diseaseGroup}
+diseaseGroup_Methotrexate_anova <- olink_anova(df = data, variable = c('Clustering', 'Methotrexate'))
+diseaseGroup_Chloroquine_anova <- olink_anova(df = data, variable = c('Clustering', 'Chloroquine'))
+
+diseaseGroup_Chloroquine_anova
+```
+
+The column *term* in the output tells us if the result refers to disease group, treatment, or the interaction effect. In this case, we are interested in the interaction effects, labeled as "Clustering:Chloroquine" and "Clustering:Methotrexate". Only NT-pro-BNP shows a significant disease-by-treatment interaction effect. We can visualize this in boxplots, with disaese group on the x-axis and color corresponding to Chloroquine treatment. In this case, the interaction effect (different Chloroquine effects in different disease groups) does not appear to be very striking, in line with the relatively modest p-value.
+
+```{r treatment-by-diseaseGroup plot}
+## boxplots
+significant <- diseaseGroup_Chloroquine_anova %>% 
+  filter(Threshold == 'Significant',
+         term == 'Clustering:Chloroquine') %>% 
+  pull(OlinkID)
+
+diseaseGroup_Chloroquine_boxplots <- olink_boxplot(df = data, 
+                                                   variable = c('Clustering', 'Chloroquine'), 
+                                                   olinkid_list = significant)
+diseaseGroup_Chloroquine_boxplots[[1]]
+```
+
+## Age at diagnosis
+
+Lastly, we will investigate if age at diagnosis has an impact (found in the column Age_at_diagnosis). We will start by fitting the following linear regression model per protein: NPX ~ Age_at_diagnosis. Since Age_at_diagnosis is a continuous variable, we can not use *olink_anova* for this. Instead, we will use the R-function *lm*. To apply it to each protein in turn and tidy up the output, we will use some convenient tidyverse functions such as *dplyr::group_by* and *broom::tidy*. 
+
+```{r age}
+age_lm <- data %>%  
+  group_by(OlinkID, Assay) %>% 
+  reframe(tidy(lm(NPX ~ Age_at_diagnosis))) %>% 
+  filter(term != '(Intercept)') %>% 
+  arrange(p.value) %>% 
+  mutate(adjPvalue = p.adjust(p.value, method = 'fdr'),
+         Threshold = ifelse(adjPvalue < .05, 'Significant', 'Non-significant'))
+
+age_lm
+```
+
+Only the protein ST2 shows a significant association to Age_at_diagnosis. We can plot NPX vs Age_at_diagnosis for this protein using ggplot. Although significant, the association appear to be modest. 
+
+```{r age plot}
+data %>% 
+  filter(OlinkID == 'OID00151') %>% 
+  ggplot(aes(x = Age_at_diagnosis, y = NPX)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_bw()
+```
+
+Could it be that the strength of the association to Age_at_diagnosis differs between disease groups? To test this, we will fit regression models including disease group, Age_at_diagnosis, and the interaction between the two (NPX ~ diseaseGroup + Age_at_diagnosis + diseaseGroup*Age_at_diagnosis). These allows for a separate NPX vs Age_at_diagnosis slope in every disease group, and a significant interaction means that the slopes differ. In other words, the association to Age_at_diagnosis differs between the groups. 
+
+```{r age-by-diseaseGroup}
+age_diseaseGroup_lm <- data %>% 
+  group_by(OlinkID, Assay) %>% 
+  reframe(tidy(lm(NPX ~ Age_at_diagnosis*Clustering))) %>% 
+  filter(term != '(Intercept)') %>% 
+  arrange(p.value) %>% 
+  mutate(adjPvalue = p.adjust(p.value, method = 'fdr'),
+         Threshold = ifelse(adjPvalue < .05, 'Significant', 'Non-significant'))
+age_diseaseGroup_lm
+
+# Plot
+data %>% 
+  filter(OlinkID == 'OID00151') %>% 
+  ggplot(aes(x = Age_at_diagnosis, y = NPX, colour = Clustering)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_bw()
+```
+
+This analysis reveals that ST2 has a strong interaction effect between Age_at_diagnosis and disease group. By plotting NPX vs Age_at_diagnosis, with a separate slope per disease group, we clearly see why. It appears like ST2 levels and Age_at_diagnosis is associated in disease groups 3&5, but not in the other groups. 
+
